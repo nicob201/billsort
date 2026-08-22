@@ -191,3 +191,35 @@ func TestPlanBatch_PagoExactMatch(t *testing.T) {
 		t.Fatalf("expected path 2026/Igarzabal/agua, got %q", got.TargetPath)
 	}
 }
+
+func TestPlanBatch_StillUnpaidAcrossAllCategories(t *testing.T) {
+	cfg := &config.Houses{Casas: []config.Casa{
+		{Nombre: "Igarzabal", Categorias: map[string]config.Categoria{
+			"agua": {NumeroCuenta: "AGUA-IGA-1"},
+			"luz":  {NumeroCuenta: "LUZ-IGA-1"},
+		}},
+	}}
+	cl := fakeClassifier{results: map[string]classify.Result{}, downloads: map[string]string{}}
+	dr := fakeDrive{
+		files: map[string][]drive.FileEntry{
+			// agua: one unpaired factura. luz: fully paid, nothing to report.
+			"2026/Igarzabal/agua": {{Name: "01-FC-1.pdf", ID: "d1"}},
+			"2026/Igarzabal/luz":  {{Name: "01-0007 - 1.pdf", ID: "d2"}, {Name: "01-0007 - 1 pago.pdf", ID: "d3"}},
+		},
+		downloads: map[string]string{},
+	}
+
+	// No local files this run — StillUnpaid must still be populated by
+	// scanning cfg's houses/categories directly, not derived from the batch.
+	plan, err := planBatch(context.Background(), nil, cfg, cl, dr, "2026")
+	if err != nil {
+		t.Fatalf("planBatch returned error: %v", err)
+	}
+	if len(plan.StillUnpaid) != 1 {
+		t.Fatalf("expected 1 still-unpaid line, got %d: %v", len(plan.StillUnpaid), plan.StillUnpaid)
+	}
+	want := "Igarzabal/agua: 01-FC-1.pdf sin pago"
+	if plan.StillUnpaid[0] != want {
+		t.Fatalf("got %q, want %q", plan.StillUnpaid[0], want)
+	}
+}
