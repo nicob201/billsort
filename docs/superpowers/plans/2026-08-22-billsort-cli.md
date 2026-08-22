@@ -1124,7 +1124,53 @@ func planBatch(ctx context.Context, files []string, cfg *config.Houses, cl class
 		}
 	}
 
+	unpaid, err := stillUnpaidReport(ctx, dr, cfg, year)
+	if err != nil {
+		return BatchPlan{}, fmt.Errorf("checking for still-unpaid facturas: %w", err)
+	}
+	plan.StillUnpaid = unpaid
+
 	return plan, nil
+}
+
+// stillUnpaidReport scans every configured house/category (not just the ones
+// touched by files in this batch) for facturas that don't have a paired
+// "pago" file yet, and returns human-readable summary lines for the final
+// report. Unlike pendingFacturasFor, this never downloads or re-classifies —
+// it only needs to know a factura exists unpaired, not its amount, so it's
+// cheap (no extra Gemini calls) even though it checks every house/category
+// on every run.
+func stillUnpaidReport(ctx context.Context, dr drive.Client, cfg *config.Houses, year string) ([]string, error) {
+	var lines []string
+	for _, casa := range cfg.Casas {
+		for categoria := range casa.Categorias {
+			entries, err := dr.ListFiles(ctx, []string{year, casa.Nombre, categoria})
+			if err != nil {
+				return nil, fmt.Errorf("listing %s/%s/%s: %w", year, casa.Nombre, categoria, err)
+			}
+
+			paidNNs := map[int]bool{}
+			facturaEntries := map[int]drive.FileEntry{}
+			for _, entry := range entries {
+				nn, ok := drive.ParseNN(entry.Name)
+				if !ok {
+					continue
+				}
+				if isPagoFilename(entry.Name) {
+					paidNNs[nn] = true
+				} else {
+					facturaEntries[nn] = entry
+				}
+			}
+			for nn, entry := range facturaEntries {
+				if paidNNs[nn] {
+					continue
+				}
+				lines = append(lines, fmt.Sprintf("%s/%s: %s sin pago", casa.Nombre, categoria, entry.Name))
+			}
+		}
+	}
+	return lines, nil
 }
 
 // pendingFacturasFor finds facturas already in the target Drive folder that
@@ -1201,7 +1247,48 @@ func extOf(path string) string {
 Run: `go test ./...`
 Expected: PASS, all tests across `config`, `match`, `drive`, `classify`, and the root package.
 
-- [ ] **Step 4: Implement the CLI entrypoint (`func main()`)**
+- [ ] **Step 4: Add a test for `stillUnpaidReport`, then verify `planBatch` populates `StillUnpaid`**
+
+`stillUnpaidReport` scans every configured house/category (not just the ones touched by files in the current batch) for facturas without a paired "pago" file — this is what makes the final report's "still unpaid" list complete even when a run has no pago files at all. Add this test to `main_test.go`:
+
+```go
+func TestPlanBatch_StillUnpaidAcrossAllCategories(t *testing.T) {
+	cfg := &config.Houses{Casas: []config.Casa{
+		{Nombre: "Igarzabal", Categorias: map[string]config.Categoria{
+			"agua": {NumeroCuenta: "AGUA-IGA-1"},
+			"luz":  {NumeroCuenta: "LUZ-IGA-1"},
+		}},
+	}}
+	cl := fakeClassifier{results: map[string]classify.Result{}, downloads: map[string]string{}}
+	dr := fakeDrive{
+		files: map[string][]drive.FileEntry{
+			// agua: one unpaired factura. luz: fully paid, nothing to report.
+			"2026/Igarzabal/agua": {{Name: "01-FC-1.pdf", ID: "d1"}},
+			"2026/Igarzabal/luz":  {{Name: "01-0007 - 1.pdf", ID: "d2"}, {Name: "01-0007 - 1 pago.pdf", ID: "d3"}},
+		},
+		downloads: map[string]string{},
+	}
+
+	// No local files this run — StillUnpaid must still be populated by
+	// scanning cfg's houses/categories directly, not derived from the batch.
+	plan, err := planBatch(context.Background(), nil, cfg, cl, dr, "2026")
+	if err != nil {
+		t.Fatalf("planBatch returned error: %v", err)
+	}
+	if len(plan.StillUnpaid) != 1 {
+		t.Fatalf("expected 1 still-unpaid line, got %d: %v", len(plan.StillUnpaid), plan.StillUnpaid)
+	}
+	want := "Igarzabal/agua: 01-FC-1.pdf sin pago"
+	if plan.StillUnpaid[0] != want {
+		t.Fatalf("got %q, want %q", plan.StillUnpaid[0], want)
+	}
+}
+```
+
+Run: `go test ./... -run TestPlanBatch_StillUnpaidAcrossAllCategories`
+Expected: PASS (the `stillUnpaidReport` function and its call from `planBatch` are already specified above in Step 2's code block — if this fails, the implementer skipped wiring it in).
+
+- [ ] **Step 5: Implement the CLI entrypoint (`func main()`)**
 
 ```go
 func main() {
@@ -1273,7 +1360,11 @@ func main() {
 
 Implement the small remaining helpers referenced above (`listLocalFiles`, `printPlanSummary`, `resolveDisambiguation`, `confirm`, `executeUploads`) as straightforward, self-contained functions — no new external dependencies, stdlib `bufio`/`os`/`fmt` only. `executeUploads` must call `dr.EnsureFolder` for each unique target path before `dr.Upload`, and must check for a name collision (via `dr.ListFiles`) before uploading, skipping and warning rather than overwriting, per spec.
 
-- [ ] **Step 5: Commit**
+`resolveDisambiguation` (called from `main` when `plan.Disambiguate` is non-empty, before the final confirmation) must, for each `NeedsDisambiguation` entry: print the local file path and each candidate (`NN`, `NumeroFactura`, `Monto`), prompt the user to type the `NN` of the correct one or `s` to skip that file, validate the input (re-prompt on anything that isn't a listed `NN` or `s`), and on a valid `NN` choice append a `PlannedUpload` to `plan.Uploads` using `match.BuildFilename` with that candidate's `NN`/`NumeroFactura`, `"pago"`, and the file's extension — the same construction `planBatch` uses for an unambiguous `MatchExact`.
+
+`printPlanSummary` must also print `plan.StillUnpaid` as a distinct "pendientes de pago" section — this is the recurring reminder value the tool adds beyond just filing documents.
+
+- [ ] **Step 6: Commit**
 
 ```bash
 git add main.go main_test.go
