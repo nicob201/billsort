@@ -1,0 +1,35 @@
+{
+  "casas": [
+    {
+      "nombre": "Igarzabal",
+      "categorias": {
+        "agua": {"numero_cuenta": "REEMPLAZAR"},
+        "gas": {"numero_cuenta": "REEMPLAZAR"},
+        "luz": {"numero_cuenta": "REEMPLAZAR"}
+      }
+    },
+    {
+      "nombre": "Pardos y Morenos",
+      "categorias": {
+        "agua": {"numero_cuenta": "REEMPLAZAR"},
+        "gas": {"numero_cuenta": "REEMPLAZAR"},
+        "luz": {"numero_cuenta": "REEMPLAZAR"}
+      }
+    },
+    {
+      "nombre": "Yaco Misque",
+      "categorias": {
+        "agua": {"numero_cuenta": "REEMPLAZAR"},
+        "gas": {"numero_cuenta": "REEMPLAZAR"},
+        "luz": {"numero_cuenta": "REEMPLAZAR"}
+      }
+    },
+    {
+      "nombre": "La Granja",
+      "categorias": {
+        "agua": {"numero_cuenta": "REEMPLAZAR"},
+        "luz": {"numero_cuenta": "REEMPLAZAR"}
+      }
+    }
+  ]
+}
