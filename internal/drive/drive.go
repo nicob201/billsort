@@ -270,13 +270,25 @@ func tokenFromWeb(ctx context.Context, conf *oauth2.Config) (*oauth2.Token, erro
 	errCh := make(chan error, 1)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if code := r.URL.Query().Get("code"); code != "" {
+		q := r.URL.Query()
+		switch {
+		case q.Get("code") != "":
 			fmt.Fprintln(w, "billsort autorizado. Podés cerrar esta ventana.")
-			codeCh <- code
-			return
+			codeCh <- q.Get("code")
+		case q.Get("error") != "":
+			// Standard OAuth way of signaling denial/failure via redirect.
+			http.Error(w, "billsort no fue autorizado.", http.StatusBadRequest)
+			desc := q.Get("error_description")
+			if desc != "" {
+				desc = ": " + desc
+			}
+			errCh <- fmt.Errorf("autorización denegada (%s%s)", q.Get("error"), desc)
+		default:
+			// Stray request with neither code nor error (e.g. the automatic
+			// GET /favicon.ico browsers issue when loading any page):
+			// ignore it, don't touch either channel.
+			http.NotFound(w, r)
 		}
-		http.Error(w, "missing authorization code", http.StatusBadRequest)
-		errCh <- fmt.Errorf("redirect arrived without a code: %s", r.URL.RawQuery)
 	})
 	srv := &http.Server{Handler: mux}
 	go srv.Serve(lis)
