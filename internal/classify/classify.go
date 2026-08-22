@@ -19,7 +19,7 @@ import (
 
 // geminiModel is the Gemini model used for document extraction. It's a
 // single constant so it can be swapped as new models ship.
-const geminiModel = "gemini-2.5-flash"
+const geminiModel = "gemini-3.6-flash"
 
 // Result is the structured extraction billsort needs from one document.
 type Result struct {
